@@ -168,7 +168,7 @@ default = http://127.0.0.1:8080 with use -x (for Burp), also multi value and pro
 echo 'http://site.tld/FUZZ' | ./hashtag-fuzz -w ./wordlist.txt -waf prime -cs 15 -t 50 -x 
 echo 'http://site.tld/FUZZ' | ./hashtag-fuzz -w ./wordlist.txt -waf entry -x 'http://proxy1.com'
 cat ./urls.txt | ./hashtag-fuzz -w ./wordlist.txt -waf common -cs 15 "header: header-val" -x 'http://proxy1.com' -x 'http://proxy2.com'
-echo 'http://site.tld/FUZZ' | ./hashtag-fuzz -w ./wordlist.txt -waf pro -cs 100 -x ./proxy.txt
+echo 'http://site.tld/FUZZ' | ./hashtag-fuzz -w ./wordlist.txt -waf pro -cs 100 -xf ./proxy.txt
 ```
 
 ### TOR Proxy 
