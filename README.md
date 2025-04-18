@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/static/v1?label=&labelColor=lightblue&message=Python&color=blue&style=flat&logo=python&logoColor=black)]()
 &nbsp;[![ffuf](https://img.shields.io/static/v1?label=&labelColor=lightblue&message=ffuf&color=blue&style=flat&logo=go&logoColor=black)]()&nbsp;[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-<img src="./IMG/Logo.png" style="width:500px; height:400px">
+<img src="./IMG/logo.png" style="width:500px; height:400px">
 
 **This tool uses multiple tricks for bypass rate limit of WAFs & CDNs & Webservers and application layer protections.**
 
