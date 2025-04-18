@@ -552,7 +552,7 @@ def main():
     parser.add_argument('-p', '--delay', help='Random delay range use in ffuf (default: [select with waf mode]) For example "0.5-2.0" or "0.3"')
     parser.add_argument('-waf', '--waf-mode', choices=['entry', 'common', 'pro', 'prime'], help='WAF behavior mode: entry, common, pro, prime')
     parser.add_argument('-cs', '--chunk-size', help='Split each wordlist with Chunk size, (default: 300)', type=int)
-    parser.add_argument('-rq', '--random-qurey', help='Append a random query string to url', action='store_true')
+    parser.add_argument('-rq', '--random-query', help='Append a random query string to url', action='store_true')
     parser.add_argument('-rs', '--random-space', help='Append a random query with whitespace characters end of url', action='store_true')
     parser.add_argument('-ct', '--case-tamper', help='Uppercase random word of host in each junk', action='store_true')
     parser.add_argument('-ht', '--header-tamper', help='Add & repeat proxy/CDN headers with Null value', action='store_true')
@@ -644,12 +644,12 @@ def main():
                         proxy = tor
                     else:
                         proxy = get_next_proxy()
-                    if args.random_qurey and args.random_space:
+                    if args.random_query and args.random_space:
                         url = add_random_query_str(url)
                         url = add_whitespace_char(url)
                     elif args.random_space:
                         url = add_whitespace_char(url)
-                    elif args.random_qurey:
+                    elif args.random_query:
                         url = add_random_query_str(url)
                     else:
                         url = args.url
@@ -683,12 +683,12 @@ def main():
                                 proxy = tor
                             else:
                                 proxy = get_next_proxy()
-                            if args.random_qurey and args.random_space:
+                            if args.random_query and args.random_space:
                                 url = add_random_query_str(url)
                                 url = add_whitespace_char(url)
                             elif args.random_space:
                                 url = add_whitespace_char(url)
-                            elif args.random_qurey:
+                            elif args.random_query:
                                 url = add_random_query_str(url)
                             if args.case_tamper:
                                 url = uppercase_random_char(url)
@@ -718,12 +718,12 @@ def main():
                         proxy = tor
                     else:
                         proxy = get_next_proxy()
-                    if args.random_qurey and args.random_space:
+                    if args.random_query and args.random_space:
                             url = add_random_query_str(url)
                             url = add_whitespace_char(url)
                     elif args.random_space:
                             url = add_whitespace_char(url)
-                    elif args.random_qurey:
+                    elif args.random_query:
                             url = add_random_query_str(url)
                     if args.case_tamper:
                             url = uppercase_random_char(url)  
@@ -756,12 +756,12 @@ def main():
                             proxy = tor
                         else:
                             proxy = get_next_proxy()
-                        if args.random_qurey and args.random_space:
+                        if args.random_query and args.random_space:
                             url = add_random_query_str(url)
                             url = add_whitespace_char(url)
                         elif args.random_space:
                             url = add_whitespace_char(url)
-                        elif args.random_qurey:
+                        elif args.random_query:
                             url = add_random_query_str(url)
                         if args.case_tamper:
                             url = uppercase_random_char(url)
