@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import subprocess, argparse, random, sys, os, time, itertools, pathlib, json, re
-from datetime import datetime
+import subprocess, argparse, random, sys, os, time, itertools, pathlib, json, re, string
+from datetime import datetime, timedelta
+from urllib.parse import urlparse, urlunparse
 
 banner = r"""
  __                       __      __                             ___
@@ -12,9 +13,8 @@ banner = r"""
     \/_/\/_/\/__/\/_/\/___/  \/_/\/_/\/__/\/__/\/_/\/___L\ \     \/_/  \/___/  \/____/\/____/
                                                      /\____/
                                                      \_/__/
-                                                            The wrapper of ffuf
-                                                        The nightmare of WAFs & CDNs
-                                                https://github.com/Hashtag-AMIN/hashtag-fuzz
+                                                            The nightmare of WAFs & CDNs
+                                                    https://github.com/Hashtag-AMIN/hashtag-fuzz
 """
 
 USER_AGENTS = [
@@ -59,6 +59,40 @@ url_regex = re.compile(
             r'(/.*)?$'                                         # optional path
         )
 
+letters = string.ascii_letters + string.digits
+
+whitespace_char = [
+    
+        "%00",
+        "%08",
+        "%09",
+        "%0a",
+        "%0b",
+        "%0C",
+        "%0d",
+        "%20",
+        "%7F",
+        "%81",
+        "%8F",
+        "%9D",
+        "%A0",
+        "%AD",
+        "%0d%0a",
+        "%C2%A0",
+        "%C2%AD"
+    ]
+
+top_proxy_headers = [
+    
+        "X-Forwarded-For",
+        "X-Forwarded-Host",
+        "X-Remote-IP",
+        "X-Originating-IP",
+        "X-Remote-Addr",
+        "X-Client-IP",
+        "X-Host",
+    ]
+
 class SingleMetavarFormatter(argparse.HelpFormatter):
 
     def _format_action_invocation(self, action):
@@ -71,10 +105,9 @@ class SingleMetavarFormatter(argparse.HelpFormatter):
             parts.extend(action.option_strings)
             if action.nargs != 0:
                 metavar = self._metavar_formatter(action, action.dest)(1)
-                parts.append(metavar[0].upper())
             return ' '.join(parts)
 
-def make_ffuf_url(url, wordlist, headers, threads, additional_cmd, delay, cookies, method, data, proxy, output_format, output_final, verbose):
+def make_ffuf_url(url, wordlist, headers, threads, additional_cmd, delay, cookies, method, data, proxy, output_format, output_final, verbose, sleep, redirect):
     
     print(f"""
   [+] Start FUZZing on {url} url ...
@@ -87,12 +120,13 @@ ________________________________________________
         '-mc', 'all',
         '-fc', '404',
         '-of', 'json',
-        '-c'
+        '-c',
+        '-noninteractive'
     ]
-    command, tmp_wordlist, tmp_output = add_headers(command, headers, additional_cmd, delay, cookies, method, data, proxy, wordlist)
-    exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, verbose)
+    command, tmp_wordlist, tmp_output = add_headers(command, headers, additional_cmd, delay, cookies, method, data, proxy, wordlist, redirect)
+    exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, verbose, sleep)
     
-def make_ffuf_raw(raw_req, wordlist, headers, threads, additional_cmd, delay, cookies, method, data, proxy, output_format, output_final, verbose):
+def make_ffuf_raw(raw_req, wordlist, headers, threads, additional_cmd, delay, cookies, method, data, proxy, output_format, output_final, verbose, sleep, redirect):
 
     print(f"""
   [+] Start FUZZing on {raw_req} file ...
@@ -105,12 +139,13 @@ def make_ffuf_raw(raw_req, wordlist, headers, threads, additional_cmd, delay, co
         '-mc', 'all',
         '-fc', '404',
         '-of', 'json',
-        '-c'
+        '-c',
+        '-noninteractive'
     ]
-    command, tmp_wordlist, tmp_output = add_headers(command, headers, additional_cmd, delay, cookies, method, data, proxy, wordlist)
-    exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, verbose)
+    command, tmp_wordlist, tmp_output = add_headers(command, headers, additional_cmd, delay, cookies, method, data, proxy, wordlist, redirect)
+    exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, verbose, sleep)
     
-def exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, verbose):
+def exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, verbose, sleep):
 
     try:
         if verbose:
@@ -132,10 +167,13 @@ def exec_ffuf(command, tmp_wordlist, tmp_output, output_format, output_final, ve
     except KeyboardInterrupt:
         print("KeyboardInterrupt Error..!")
         print("Stop Script Manually!!")
-
-    time.sleep(1)
-
-def add_headers(command, headers, additional_cmd, delay, cookies, method, data, proxy, wordlist):
+    
+    if sleep:
+        time.sleep(sleep)
+    else:
+        time.sleep(1)
+        
+def add_headers(command, headers, additional_cmd, delay, cookies, method, data, proxy, wordlist, redirect):
 
     if headers:
         for header in headers:
@@ -153,6 +191,9 @@ def add_headers(command, headers, additional_cmd, delay, cookies, method, data, 
     if delay:
         command.extend(['-p',f'{delay}'])
 
+    if redirect:
+        command.extend(['-r'])
+    
     if proxy:
         command.extend(['-x',f'{proxy}'])
 
@@ -161,8 +202,6 @@ def add_headers(command, headers, additional_cmd, delay, cookies, method, data, 
 
     tmp_wordlist = make_wordlist_file(wordlist)
     command.extend(['-w', f"{tmp_wordlist}"])
-
-    command.extend(['-H',f'User-Agent: {random.choice(USER_AGENTS)}'])
     
     tmp_output = f"tmp-output-{time.time_ns()}.json"
     command.extend(['-o', f"{tmp_output}"])
@@ -188,39 +227,58 @@ def get_waf_headers(mode):
         'entry': [
             f"X-Forwarded-For: {random_IP}",
             f"X-Forwarded-Host: {random_IP}",
-            f"Client-IP: {random_IP}"
+            f"X-Remote-IP: {random_IP}",
+            f"X-Originating-IP: {random_IP}",
+            f"X-Remote-Addr: {random_IP}",
+            f"X-Client-IP: {random_IP}",
+            f"X-Host: {random_IP}",
+            f"True-Client-IP: {random_IP}",
+            f"Client-IP: {random_IP}",
         ],
         'common': [
             f"X-Forwarded-For: {random_IP}",
+            f"X-Forwarded-Host: {random_IP}",
             f"X-Real-IP: {random_IP}",
-            f"X-Forwarded: {random_IP}",
+            f"X-Remote-Addr: {random_IP}",
+            f"X-Forwarded-By: {random_IP}",
+            f"X-Remote-IP: {random_IP}",
+            f"X-Originating-IP: {random_IP}",
+            f"X-Client-IP: {random_IP}",
+            f"X-Host: {random_IP}",
             f"True-Client-IP: {random_IP}",
             f"Client-IP: {random_IP}",
-            f"X-Forwarded-By: {random_IP}",
         ],
         'pro': [
             f"X-Forwarded-For: {random_IP}",
             f"X-Real-IP: {random_IP}",
+            f"X-Remote-IP: {random_IP}",
             f"X-Client-IP: {random_IP}",
             f"X-Forwarded-Host: {random_IP}",
             f"X-Remote-Addr: {random_IP}",
+            f"X-Forwarded-By: {random_IP}",
+            f"X-Original-For: {random_IP}",
+            f"X-Originating-IP: {random_IP}",
+            f"X-Forwarded: {random_IP}",
+            f"X-Host: {random_IP}",
             f"True-Client-IP: {random_IP}",
             f"Client-IP: {random_IP}",
-            f"X-Forwarded-By: {random_IP}",
-            f"X-Original-For: {random_IP}"
         ],
         'prime': [
             f"X-Forwarded-For: {random_IP}",
+            f"X-Remote-Addr: {random_IP}",
             f"X-Remote-IP: {random_IP}",
             f"X-Forwarded-Host: {random_IP}",
             f"X-Forwarded-Server: {random_IP}",
-            f"True-Client-IP: {random_IP}",
-            f"Client-IP: {random_IP}",
             f"X-Forwarded-By: {random_IP}",
             f"X-Client-IP: {random_IP}",
             f"X-Real-IP: {random_IP}",
             f"X-Forward-For: {random_IP}",
             f"X-Original-For: {random_IP}",
+            f"X-Forwarded: {random_IP}",
+            f"X-Originating-IP: {random_IP}",
+            f"X-Host: {random_IP}",
+            f"True-Client-IP: {random_IP}",
+            f"Client-IP: {random_IP}",
             f"Forwarded: for={random_IP}; proto=http; by={random_IP}"
         ]
     }
@@ -237,7 +295,7 @@ def get_threads_waf(mode):
 
 def get_delay_waf(mode):
     delays = {
-        'entry': '0.1-0.2',
+        'entry': '0.1-0.3',
         'common': '0.2-0.5',
         'pro': '0.5-1',  
         'prime': '1-2'
@@ -254,47 +312,61 @@ def get_chunk_size(mode):
     return chunk_size.get(mode, 300)
 
 def split_wordlist(wordlist, chunk_size):
-    with open(wordlist, 'r') as file:
+    with open(wordlist, 'r', encoding='utf-8', errors='ignore') as file:
         lines = file.readlines()
     return [lines[i:i + chunk_size] for i in range(0, len(lines), chunk_size)]
 
 def make_wordlist_file(wordlist_chunked):
     file_name = f"./tmp-wordlist-{time.time_ns()}.txt"
-    with open(file_name, 'w') as file:
+    with open(file_name, 'w', encoding='utf-8', errors='ignore') as file:
         file.writelines(wordlist_chunked)
     return file_name
 
 def write_final_output(tmp_output, format_output, output_final):
-    with open(tmp_output, "r") as file:
+    with open(tmp_output, "r", encoding='utf-8', errors='ignore') as file:
         data = json.load(file)
 
     sorted_results = sorted(data['results'], key=lambda x: x['status'])
 
-    if format_output == "txt":
+    if format_output.lower() == "txt":
         txt_output = "\n".join(f"[{result['status']}] {result['url']} [{result['length']}] [{result['input']['FUZZ']}]" for result in sorted_results)
 
         if txt_output:
-            with open(output_final, 'a') as file:
+            with open(output_final, 'a', encoding='utf-8', errors='ignore') as file:
                 file.write(txt_output  + "\n")
 
-    elif format_output == "csv":
-        md_output = "\n".join(f"{result['status']},{result['url']},{result['length']},{result['input']['FUZZ']}" for result in sorted_results)
+    elif format_output.lower() == "csv":
+        csv_output = "\n".join(f"{result['status']},{result['url']},{result['length']},{result['input']['FUZZ']}" for result in sorted_results)
 
-        if md_output:
-            with open(output_final, 'a') as file:
-                file.write(md_output + "\n")
+        if csv_output:
+            with open(output_final, 'a', encoding='utf-8', errors='ignore') as file:
+                file.write(csv_output + "\n")
+
+    elif format_output.lower() == "json":
+        json_output = [{'status': result['status'], 'url': result['url'], 'length': result['length'], 'FUZZ': result['input']['FUZZ']} for result in sorted_results]
+
+        try:
+            with open(output_final, 'r', encoding='utf-8', errors='ignore') as file:
+                existing_data = json.load(file)
+        except:
+                existing_data = []
+        existing_data.extend(json_output)
+
+        if json_output:
+            with open(output_final, 'w', encoding='utf-8', errors='ignore') as file:
+                file.write(json.dumps(existing_data))
     
     os.remove(tmp_output)
 
 def sort_by_status(output_file):
-    with open(output_file, 'r') as file:
+    with open(output_file, 'r', encoding='utf-8', errors='ignore') as file:
         lines = file.readlines()
 
     lines_with_status = [(line.split()[0], line) for line in lines]
     sorted_lines = sorted(lines_with_status, key=lambda x: x[0])
     sorted_lines = [line[1] for line in sorted_lines]
 
-    with open(output_file, 'w') as file:
+    with open(output_file, 'w', encoding='utf-8', errors='ignore') as file:
         file.writelines(sorted_lines)
 
 def restart_tor():
@@ -330,51 +402,191 @@ def validate_urls(urls):
             print(f"Invalid URL: {url}")
             sys.exit(0)
 
+def add_browser_header(url):
+    
+    parsed_url = urlparse(url)
+    browser_headers = [
+        
+        f"User-Agent: {random.choice(USER_AGENTS)}",
+        f'Origin: {parsed_url.scheme}://{parsed_url.netloc}',
+        f'Referer: {parsed_url.scheme}://{parsed_url.netloc}/',
+        f"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        f"Accept-Encoding: gzip, deflate, br",
+        f"Accept-Language: en-US,en;q=0.9",
+        f"Upgrade-Insecure-Requests: 1",
+        f"Sec-Fetch-Dest: empty",
+        f"Sec-Fetch-Mode: cors",
+        f"Sec-Fetch-Site: same-origin",
+        f"Sec-Fetch-User: ?1",
+        f'Sec-Ch-Ua-Platform: "Windows"',
+        f"Sec-Ch-Ua-Mobile: ?0",
+        f'Sec-Ch-Ua: "Chromium";v="135", "Not-A.Brand";v="8"'
+        f"Cache-Control: max-age=0",
+        f"If-Modified-Since: {(datetime.now() - timedelta(days=7)).strftime('%a, %d %b %Y %H:%M:%S GMT')}",
+        f"If-None-Match: *",
+        f"X-Requested-With: XMLHttpRequest",
+        f"Priority: u=1",
+        f"Te: trailers",
+        f"DNT: 1",
+        
+    ]
+    return browser_headers
+
+def generate_random_string(length):
+        return ''.join(random.choice(letters) for _ in range(length))
+    
+def add_random_query_str(url):
+    
+    if "?" in url:
+        if url[-1] in ["?",'&']:
+            url = url + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7))
+            
+        elif url[-1] == "=" or url[-1] in string.printable:
+            url = url + "&" + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7))
+        
+    else:
+        if url.count("/") >= 3:
+            url = url + "?" + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7))
+            
+        elif url.count("/") == 2:
+            url = url + "/?" + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7))
+            
+    return url
+
+def add_whitespace_char(url):
+    
+    if "?" in url:
+        if url[-1] in ["?",'&']:
+            url = url + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7)) + random.choice(whitespace_char)
+            
+        elif url[-1] == "=" or url[-1] in string.printable:
+            url = url + "&" + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7)) + random.choice(whitespace_char)
+        
+    else:
+        if url.count("/") >= 3:
+            url = url + "?" + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7)) + random.choice(whitespace_char)
+            
+        elif url.count("/") == 2:
+            url = url + "/?" + generate_random_string(random.randint(4,7)) + "=" + generate_random_string(random.randint(4,7)) + random.choice(whitespace_char)
+            
+    return url
+
+def extract_url_from_raw(raw_request):
+    with open(raw_request, 'r', encoding='utf-8', errors='ignore') as file:
+        lines = [line.strip() for line in file.readlines()]
+        request_line = lines[0]
+        path = request_line.split()[1]
+    
+        host = None
+        for line in lines:
+            if line.lower().startswith("host:"):
+                host = line.split(":", 1)[1].strip()
+                break
+        if not host:
+            raise ValueError("Host header not found.")
+        
+        url = f"https://{host}{path}"
+    return url
+
+def update_raw_path(url, raw_request):
+
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    if parsed_url.query:
+        path = f"{path}?{parsed_url.query}"
+
+    with open(raw_request, 'r+', encoding='utf-8', errors='ignore') as file:
+        request_lines = [line.strip() for line in file.readlines()]
+        if not request_lines:
+            return None
+        first_line = request_lines[0]
+        method, _, version = first_line.split()
+        new_first_line = f"{method} {path} {version}"
+        request_lines[0] = new_first_line
+
+        for i, line in enumerate(request_lines[1:]):
+            if line.lower().startswith('host:'):
+                request_lines[i + 1] = f"Host: {parsed_url.netloc}"
+                break
+        updated_request = "\n".join(request_lines).strip() + "\n\n"
+        
+        file.seek(0)
+        file.truncate()
+        file.write(updated_request)
+
+    return raw_request
+
+def uppercase_random_char(url):
+    parsed_url = urlparse(url)
+    host = parsed_url.netloc
+    random_index = random.randint(0, len(host) - 1)
+    host = host[:random_index] + host[random_index].upper() + host[random_index + 1:]
+    modified_url = parsed_url._replace(netloc=host)
+    
+    return urlunparse(modified_url)
+
+def add_tamper_header(wafHeaderSet):
+    if wafHeaderSet:
+        tampe_header = [f"{random.choice(top_proxy_headers)}:  "]
+    else:
+        header = random.choice(top_proxy_headers)
+        tampe_header = [
+            f"{header}: {generate_random_ip()}",
+            f"{header}:  "
+        ]
+    return tampe_header
+
 def main():
 
-    parser = argparse.ArgumentParser(description="hashtag-fuzz wrapper for FFUF.", formatter_class=SingleMetavarFormatter)
+    parser = argparse.ArgumentParser(formatter_class=SingleMetavarFormatter)
     parser.add_argument('-u', '--url', help='Target URL', type=str)
-    parser.add_argument('-U', '--urls', help='File include List of Target URLs')
-    parser.add_argument('-request','--request-raw', help='File Path to raw request [-request-proto is default: https, if need to change with -a command: -a="-request-proto http"]')
-    parser.add_argument('-H', '--header', action='append', help='Custom headers to add to requests', type=str)
-    parser.add_argument('-b', '--cookie', help='Cookies to add to requests', type=str)
-    parser.add_argument('-d', '--data', help='Data to send with the request for POST/PUT/PATCH methods', type=str)
-    parser.add_argument('-X', '--method', help='HTTP method to use (e.g., GET, POST, PUT)')
-    parser.add_argument('-w', '--wordlist', required=True, action='append', help='Path to wordlist', type=pathlib.Path)
-    parser.add_argument('-waf', '--waf-mode', choices=['entry', 'common', 'pro', 'prime'], help='WAF or CDN behavior mode: entry, common, pro, or prime')
-    parser.add_argument('-cs', '--chunk-size', help='Split each wordlist with Chunk size, (default=300)', type=int)
-    parser.add_argument('-t', '--thread', help='threads use in ffuf (default=[select in waf mode])', type=int)
-    parser.add_argument('-p', '--random-delay', help='random delay range use in ffuf (default=[select in waf mode])')
-    parser.add_argument('-x', '--proxy', nargs='?', const='http://127.0.0.1:8080', action='append', help='Proxy server|servers to use (c)')
+    parser.add_argument('-U', '--urls', help='File include List of Target URLs', type=pathlib.Path)
+    parser.add_argument('-request','--req-raw', help='File containing the raw http request [-request-proto is default: https, change with -a command: -a="-request-proto http"]', type=pathlib.Path)
+    parser.add_argument('-H', '--header', action='append', help='Custom headers to add to requests,  Multiple -H flags are accepted.', type=str)
+    parser.add_argument('-b', '--cookie', help='Cookie data `"NAME1=VALUE1; NAME2=VALUE2"` for copy as curl[ffuf] functionality.', type=str)
+    parser.add_argument('-d', '--data', help='Body to send with the request', type=str)
+    parser.add_argument('-X', '--method', help='HTTP method to use (e.g.,GET,POST,PUT)', type=str)
+    parser.add_argument('-r', '--redirect', help='Follow redirects (default: false)', action='store_true')
+    parser.add_argument('-w', '--wordlist', required=True, action='append', help='Path to wordlist,  Multiple -w/--wordlist flags are accepted and fuzz with all wordlist.', type=str)
+    parser.add_argument('-t', '--thread', help='Threads use in ffuf (default: [select with waf mode])', type=int)
+    parser.add_argument('-p', '--delay', help='Random delay range use in ffuf (default: [select with waf mode]) For example "0.5-2.0" or "0.3"')
+    parser.add_argument('-waf', '--waf-mode', choices=['entry', 'common', 'pro', 'prime'], help='WAF behavior mode: entry, common, pro, prime')
+    parser.add_argument('-cs', '--chunk-size', help='Split each wordlist with Chunk size, (default: 300)', type=int)
+    parser.add_argument('-rq', '--random-qurey', help='Append a random query string to url', action='store_true')
+    parser.add_argument('-rs', '--random-space', help='Append a random query with whitespace characters end of url', action='store_true')
+    parser.add_argument('-ct', '--case-tamper', help='Uppercase random word of host in each junk', action='store_true')
+    parser.add_argument('-ht', '--header-tamper', help='Add & repeat proxy/CDN headers with Null value', action='store_true')
+    parser.add_argument('-sl', '--sleep', help='Sleep beetween fuzzing each junk of wordlist', type=int)
+    parser.add_argument('-x', '--proxy', nargs='?', const='http://127.0.0.1:8080', action='append', help='Proxy server(s) to use (default: http://127.0.0.1:8080 for Burp) Multiple -x/--proxy flags are accepted')
     parser.add_argument('-xf', '--proxy-file', help='Proxy servers file to use', type=pathlib.Path)
-    parser.add_argument('-tor', '--tor', const='socks5://127.0.0.1:9050', nargs='?', help='use Tor proxy with unique(dynamic) IP address for each chunk of wordlist (default=socks5://127.0.0.1:9050)')
-    parser.add_argument('-o', '--output', help='Output file name of FFUF result', default='output.txt', type=str)
-    parser.add_argument('-of', '--output-format', help='Output of FFUF brief and useful mode: txt, csv', default='txt', type=str, choices=['txt','csv'])
-    parser.add_argument('-a', '--additional-cmd', help='Additional FFUF commands', type=str)
-    parser.add_argument('-v', '--verbose', help='verbose mode default: False', action='store_true')
+    parser.add_argument('-tor', '--tor', const='socks5://127.0.0.1:9050', nargs='?', help='Use Tor with unique(dynamic) IP for each chunk of wordlist (default: socks5://127.0.0.1:9050)')
+    parser.add_argument('-o', '--output', help='Output file name of FFUF result', default='output', type=str)
+    parser.add_argument('-of', '--output-format', help='Output of FFUF brief and useful mode: txt, csv, json (default: txt)', default='txt', type=str, choices=['txt','csv','json'])
+    parser.add_argument('-a', '--additional-cmd', help='Additional commands for FFUF', type=str)
+    parser.add_argument('-v', '--verbose', help='verbose mode (default: false)', action='store_true')
 
     args = parser.parse_args()
 
-    if len([arg for arg in sys.argv if arg in ['-u', '-U', '-request', '--url', '--urls', '--request']]) > 1:
-        parser.error("[-] Argument -u/--url|-U/--urls|-request/--request: not allowed with more than one use !!")
+    if len([arg for arg in sys.argv if arg in ['-u', '-U', '-request', '--url', '--urls', '--req-raw']]) > 1:
+        parser.error("[-] Argument -u/--url|-U/--urls|-request/--req-raw: not allowed with more than one use !!")
     
-    if sum(bool(arg) for arg in [args.url, args.urls, args.request_raw, not sys.stdin.isatty()]) != 1:
-        parser.error("[-] You must provide exactly one of --url, --urls, --request, or input from stdin !!")
+    if sum(bool(arg) for arg in [args.url, args.urls, args.req_raw, not sys.stdin.isatty()]) != 1:
+        parser.error("[-] You must provide exactly one of -u/--url, -U/--urls, -request/--req-raw, or input from stdin !!")
 
     for wordlist in args.wordlist:
         if not os.path.exists(wordlist):
             parser.error(f"[-] The file {wordlist} value of -w/--wordlist flag does not exist !!")
     
-    if args.request_raw:
-        if not os.path.exists(args.request_raw):
-            parser.error(f"[-] The file {args.request_raw} value of -request/--request flag does not exist !!")
+    if args.req_raw:
+        if not os.path.exists(args.req_raw):
+            parser.error(f"[-] The file {args.req_raw} value of -request/--req-raw flag does not exist !!")
     
     if sum(bool(arg) for arg in [args.proxy, args.proxy_file, args.tor]) > 1:
         parser.error("[-] You must provide exactly one of --proxy/--proxy-file/--tor !!")
 
     if len([arg for arg in sys.argv if arg in ['-tor', '--tor', '-xf', '--proxy-file']]) > 1:
         parser.error("[-] Argument -tor/--tor|-xf/--proxy-file: not allowed with more than one use !!")
-
+    
     proxy = args.proxy
     proxy_file = args.proxy_file
     tor = args.tor
@@ -387,8 +599,8 @@ def main():
     else:
         threads = get_threads_waf(args.waf_mode)
     
-    if args.random_delay:
-        delay = args.random_delay
+    if args.delay:
+        delay = args.delay
     else:
         delay = get_delay_waf(args.waf_mode)
 
@@ -397,10 +609,10 @@ def main():
     else:
         chunnk_size = get_chunk_size(args.waf_mode)
 
-    output_final = f"{output}__{datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')}.{output_format}"
+    output_final = f"{output}__{datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')}.{output_format.lower()}"
 
     if proxy_file:
-        with open(proxy_file, "r") as file:
+        with open(proxy_file, "r", encoding='utf-8', errors='ignore') as file:
             lines = file.readlines()
             proxies = [line.strip() for line in lines]
         validate_proxies(proxies)
@@ -416,61 +628,112 @@ def main():
 
     try:
         if args.url:
-            validate_urls([args.url])
+            url = args.url
+            validate_urls([url])
             for wordlist in args.wordlist:
                 wordlist_chunks = split_wordlist(wordlist, chunnk_size)
                 for wordlist_chunk in wordlist_chunks:
                     headers = args.header.copy() if args.header else []
+                    headers.extend(add_browser_header(url))
                     if args.waf_mode:
                         headers.extend(get_waf_headers(args.waf_mode))
+                    if args.header_tamper:
+                        headers.extend(add_tamper_header(args.waf_mode))
                     if tor:
                         restart_tor()
                         proxy = tor
                     else:
                         proxy = get_next_proxy()
-                    make_ffuf_url(args.url, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose)
+                    if args.random_qurey and args.random_space:
+                        url = add_random_query_str(url)
+                        url = add_whitespace_char(url)
+                    elif args.random_space:
+                        url = add_whitespace_char(url)
+                    elif args.random_qurey:
+                        url = add_random_query_str(url)
+                    else:
+                        url = args.url
+                    if args.case_tamper:
+                        url = uppercase_random_char(url)
+                    
+                    make_ffuf_url(url, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose, args.sleep, args.redirect)
                     headers = []
-
+                    url = args.url
+                    
             if os.path.exists(output_final):
                 sort_by_status(output_final)
 
         elif args.urls:
-            with open(args.urls, 'r') as f:
+            with open(args.urls, 'r', encoding='utf-8', errors='ignore') as f:
                 urls = f.read().splitlines()
                 validate_urls(urls)
                 for url in urls:
+                    main_url = url
                     for wordlist in args.wordlist:
                         wordlist_chunks = split_wordlist(wordlist, chunnk_size)
-                        headers = args.header.copy() if args.header else []
                         for wordlist_chunk in wordlist_chunks:
+                            headers = args.header.copy() if args.header else []
+                            headers.extend(add_browser_header(url))
                             if args.waf_mode:
                                 headers.extend(get_waf_headers(args.waf_mode))
+                            if args.header_tamper:
+                                headers.extend(add_tamper_header(args.waf_mode))
                             if tor:
                                 restart_tor()
                                 proxy = tor
                             else:
                                 proxy = get_next_proxy()
-                            make_ffuf_url(url, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose)
+                            if args.random_qurey and args.random_space:
+                                url = add_random_query_str(url)
+                                url = add_whitespace_char(url)
+                            elif args.random_space:
+                                url = add_whitespace_char(url)
+                            elif args.random_qurey:
+                                url = add_random_query_str(url)
+                            if args.case_tamper:
+                                url = uppercase_random_char(url)
+                            
+                            make_ffuf_url(url, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose, args.sleep, args.redirect)
                             headers = []
+                            url = main_url
             
             if os.path.exists(output_final):
                 sort_by_status(output_final)
 
-        elif args.request_raw:
+        elif args.req_raw:
+            main_url = extract_url_from_raw(args.req_raw)
+            request_raw = args.req_raw
             for wordlist in args.wordlist:
                 wordlist_chunks = split_wordlist(wordlist, chunnk_size)
                 for wordlist_chunk in wordlist_chunks:
                     headers = args.header.copy() if args.header else []
+                    url = extract_url_from_raw(request_raw)
+                    headers.extend(add_browser_header(url))
                     if args.waf_mode:
                         headers.extend(get_waf_headers(args.waf_mode))
+                    if args.header_tamper:
+                        headers.extend(add_tamper_header(args.waf_mode))
                     if tor:
                         restart_tor()
                         proxy = tor
                     else:
                         proxy = get_next_proxy()
-                    make_ffuf_raw(args.request_raw, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose)
+                    if args.random_qurey and args.random_space:
+                            url = add_random_query_str(url)
+                            url = add_whitespace_char(url)
+                    elif args.random_space:
+                            url = add_whitespace_char(url)
+                    elif args.random_qurey:
+                            url = add_random_query_str(url)
+                    if args.case_tamper:
+                            url = uppercase_random_char(url)  
+                    
+                    update_raw_path(url, request_raw)
+                    
+                    make_ffuf_raw(request_raw, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose, args.sleep, args.redirect)
                     headers = []
-
+                    update_raw_path(main_url, request_raw)
+                    
             if os.path.exists(output_final):
                 sort_by_status(output_final)
 
@@ -478,19 +741,34 @@ def main():
             urls = [line.strip() for line in sys.stdin]
             validate_urls(urls)
             for url in urls:
+                main_url = url
                 for wordlist in args.wordlist:
                     wordlist_chunks = split_wordlist(wordlist, chunnk_size)
                     for wordlist_chunk in wordlist_chunks:
                         headers = args.header.copy() if args.header else []
+                        headers.extend(add_browser_header(url))
                         if args.waf_mode:
                             headers.extend(get_waf_headers(args.waf_mode))
+                        if args.header_tamper:
+                            headers.extend(add_tamper_header(args.waf_mode))
                         if tor:
                             restart_tor()
                             proxy = tor
                         else:
                             proxy = get_next_proxy()
-                        make_ffuf_url(url, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose)
+                        if args.random_qurey and args.random_space:
+                            url = add_random_query_str(url)
+                            url = add_whitespace_char(url)
+                        elif args.random_space:
+                            url = add_whitespace_char(url)
+                        elif args.random_qurey:
+                            url = add_random_query_str(url)
+                        if args.case_tamper:
+                            url = uppercase_random_char(url)
+                        
+                        make_ffuf_url(url, wordlist_chunk, headers, threads, args.additional_cmd, delay, args.cookie, args.method, args.data, proxy, output_format, output_final, verbose, args.sleep, args.redirect)
                         headers = []
+                        url = main_url
 
         if os.path.exists(output_final):
             sort_by_status(output_final)
