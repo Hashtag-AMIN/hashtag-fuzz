@@ -125,7 +125,7 @@ options:
   -p --delay           Random delay range use in ffuf (default: [select with waf mode]) For example "0.5-2.0" or "0.3"
   -waf --waf-mode      WAF behavior mode: entry, common, pro, prime
   -cs --chunk-size     Split each wordlist with Chunk size, (default: 300)
-  -rq --random-qurey   Append a random query string to url
+  -rq --random-query   Append a random query string to url
   -rs --random-space   Append a random query with whitespace characters end of url
   -ct --case-tamper    Uppercase random word of host in each junk
   -ht --header-tamper  Add & repeat proxy/CDN headers with Null value
@@ -150,7 +150,7 @@ Checkout more details in [wiki/Basic-fuzz](https://github.com/Hashtag-AMIN/hasht
 ./hashtag-fuzz -U ./urls.txt -w ./wordlist.txt -H "X-header: header-value" --header-tamper -cs 10
 ```
 ```bash
-./hashtag-fuzz -request ./req-raw.txt -w ./wordlist.txt -waf common -xf ./proxy.txt --random-qurey -r
+./hashtag-fuzz -request ./req-raw.txt -w ./wordlist.txt -waf common -xf ./proxy.txt --random-query -r
 ```
 ```bash
 echo 'http://site.tld' | ./hashtag-fuzz -w ./wordlist.txt -d "var1=FUZZ&var2=val2" -X "PUT" -tor
